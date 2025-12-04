@@ -11,12 +11,13 @@ import asyncio
 import os
 import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Callable
 from urllib.parse import urlparse, parse_qs
 
 from .config import ConfigLoader, EndpointConfigLoader
 from .endpoints import get_global_endpoints, get_resource_endpoints
 from .auth import OktaAuthenticator
+from .auth.credential_provider import CredentialProvider, JsonCredentialProvider
 # Database- and encryption-backed credentials removed.
 # Use JSON credentials or environment variables instead.
 
@@ -30,7 +31,9 @@ class OktaIGABackupAsync:
     def __init__(self, tenant_id: int, backup_dir: str = "backup",
                  test_mode: bool = False, config: Optional[ConfigLoader] = None,
                  config_file: str = "configs/config.json", endpoint_config_file: str = "configs/endpoints.json",
-                 credentials_file: str = "configs/credentials.json", use_json_credentials: bool = True):
+                 credentials_file: str = "configs/credential.json", use_json_credentials: bool = True,
+                 object_sink: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+                 credential_provider: Optional[CredentialProvider] = None):
         self.tenant_id = tenant_id
         self.customer_id = None  # Will be fetched from JSON or database
         self.backup_dir = backup_dir
@@ -38,6 +41,12 @@ class OktaIGABackupAsync:
         self.config = config
         self.credentials_file = credentials_file
         self.use_json_credentials = use_json_credentials
+        self.object_sink = object_sink
+        if credential_provider is not None:
+            self.credential_provider = credential_provider
+        else:
+            # Default to JSON-based credentials
+            self.credential_provider = JsonCredentialProvider(credentials_file)
 
         # Load config internally if not provided (config_loader will determine environment)
         self.config_manager = config or ConfigLoader(config_file=config_file)
@@ -116,8 +125,8 @@ class OktaIGABackupAsync:
 
     async def __aenter__(self):
         """Async context manager entry - initialize database or JSON, fetch credentials, and create session."""
-        # Fetch tenant credentials from JSON (database support removed)
-        self.fetch_tenant_credentials_from_json()
+        # Fetch tenant credentials via configured provider (JSON by default)
+        self.fetch_tenant_credentials()
 
         # Create connector with connection pool settings
         connector = aiohttp.TCPConnector(
@@ -283,6 +292,16 @@ class OktaIGABackupAsync:
 
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(backup_object, f, indent=2, ensure_ascii=False)
+
+        if self.object_sink is not None:
+            try:
+                self.object_sink(endpoint_name, backup_object)
+            except Exception as e:
+                # Log a warning but do not crash the backup
+                if hasattr(self, "logger") and self.logger:
+                    self.logger.warning(
+                        f"Object sink failed for {endpoint_name}/{obj_id}: {e}"
+                    )
 
     def create_list_file(self, all_objects: List[Dict], endpoint_name: str):
         """Create list.json file with all objects in same structure as individual files."""
@@ -958,64 +977,67 @@ class OktaIGABackupAsync:
         return working_resources
 
     def fetch_tenant_credentials_from_json(self):
-        """Fetch tenant credentials from JSON file instead of database."""
-        try:
-            if not os.path.exists(self.credentials_file):
-                raise FileNotFoundError(f"Credentials file not found: {self.credentials_file}")
+        """
+        Backwards-compatible wrapper that fetches tenant credentials from JSON.
+        Internally this now uses the configured CredentialProvider, which by
+        default is JsonCredentialProvider.
+        """
+        # Ensure we are using a JsonCredentialProvider
+        if not isinstance(self.credential_provider, JsonCredentialProvider):
+            self.credential_provider = JsonCredentialProvider(self.credentials_file)
 
-            with open(self.credentials_file, 'r') as f:
-                credentials_data = json.load(f)
-
-            # Find the tenant in the JSON file
-            tenant = None
-            for t in credentials_data.get('tenants', []):
-                if t.get('id') == self.tenant_id:
-                    tenant = t
-                    break
-
-            if not tenant:
-                raise ValueError(f"Tenant {self.tenant_id} not found in {self.credentials_file}")
-
-            # Extract credentials from JSON
-            self.okta_domain = tenant.get('okta_domain')
-            self.api_token = tenant.get('api_token')
-            self.client_id = tenant.get('oauth_client_id')
-            self.client_secret = tenant.get('oauth_client_secret')
-            self.customer_id = tenant.get('customer_id')
-
-            if not self.okta_domain:
-                raise ValueError(f"okta_domain not found for tenant {self.tenant_id}")
-            if not self.api_token:
-                raise ValueError(f"api_token not found for tenant {self.tenant_id}")
-
-            # Set base_url - add https:// only if not already present
-            if self.okta_domain.startswith(('http://', 'https://')):
-                self.base_url = self.okta_domain
-            else:
-                self.base_url = f"https://{self.okta_domain}"
-
-            # Setup backup directory now that we have customer_id
-            if self.backup_path is None:
-                tenant_folder = f"tenant_{self.tenant_id}_customer_{self.customer_id}"
-                self.backup_path = os.path.join(
-                    self.backup_dir,
-                    self.environment,
-                    tenant_folder,
-                    f"backup_{self.backup_timestamp}"
-                )
-                os.makedirs(self.backup_path, exist_ok=True)
-
-            print(f"[OK] Successfully loaded credentials from JSON for tenant {self.tenant_id}, customer {self.customer_id}")
-            print(f"  Domain: {self.okta_domain}")
-            print(f"  Backup directory: {self.backup_path}")
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to fetch tenant credentials from JSON: {e}")
+        self.fetch_tenant_credentials()
 
     def fetch_tenant_credentials(self):
-        """Database-backed credential fetching removed.
-
-        This project no longer supports fetching encrypted credentials from a
-        database. Use JSON credentials or environment variables instead.
         """
-        raise RuntimeError("Database-backed credentials removed; use JSON credentials")
+        Fetch tenant credentials using the configured CredentialProvider.
+        By default, this uses JsonCredentialProvider and reads configs/credential.json.
+        """
+        if not hasattr(self, "credential_provider") or self.credential_provider is None:
+            raise RuntimeError("No credential provider configured for OktaIGABackupAsync")
+
+        tenant = self.credential_provider.get_tenant_credentials(self.tenant_id)
+
+        # Extract credentials from the returned dict (same fields as before)
+        self.okta_domain = tenant.get("okta_domain")
+        self.api_token = tenant.get("api_token")
+        self.client_id = tenant.get("oauth_client_id")
+        self.client_secret = tenant.get("oauth_client_secret")
+        self.customer_id = tenant.get("customer_id")
+
+        if not self.okta_domain:
+            raise ValueError(f"okta_domain not found for tenant {self.tenant_id}")
+        if not self.api_token and not (self.client_id and self.client_secret):
+            raise ValueError(
+                f"api_token or oauth_client credentials must be present for tenant {self.tenant_id}"
+            )
+
+        # Set base_url - add https:// only if not already present
+        if self.okta_domain.startswith(("http://", "https://")):
+            self.base_url = self.okta_domain
+        else:
+            self.base_url = f"https://{self.okta_domain}"
+
+        # Setup backup directory now that we have customer_id
+        if self.backup_path is None:
+            tenant_folder = f"tenant_{self.tenant_id}_customer_{self.customer_id}"
+            self.backup_path = os.path.join(
+                self.backup_dir,
+                self.environment,
+                tenant_folder,
+                f"backup_{self.backup_timestamp}"
+            )
+            os.makedirs(self.backup_path, exist_ok=True)
+
+        print(f"[OK] Successfully loaded credentials for tenant {self.tenant_id}, customer {self.customer_id}")
+        print(f"  Domain: {self.okta_domain}")
+        print(f"  Backup directory: {self.backup_path}")
+
+        # Optionally log a short summary (keep existing logging behavior if present)
+        if hasattr(self, "logger") and self.logger:
+            self.logger.info(
+                f"Loaded credentials for tenant %s, customer %s, domain %s",
+                self.tenant_id,
+                self.customer_id,
+                self.okta_domain,
+            )

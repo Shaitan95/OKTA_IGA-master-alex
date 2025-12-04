@@ -63,6 +63,51 @@ python run_backup.py
 python run_backup.py
 ```
 
+## Using with Databricks
+
+Run backups directly from a Databricks notebook without changing the core workflow:
+
+1. Add this repository as a Databricks Repo.
+2. Install dependencies on your cluster:
+   ```
+   %pip install -r requirements.txt
+   ```
+3. Import and call either `run_backup_sync` (synchronous helper) or `OktaIGABackupAsync`:
+   ```python
+   from okta_iga import run_backup_sync
+
+   summary = run_backup_sync(tenant_id=1)
+   print(summary)
+   ```
+
+### Credentials in Databricks
+
+- By default, credentials come from `configs/credential.json` via the built-in `JsonCredentialProvider`.
+- Credentials are pluggable through the `CredentialProvider` abstraction, so you can add a future `DbCredentialProvider` (e.g., to fetch secrets from Databricks or an external DB) without modifying `OktaIGABackupAsync`.
+
+### Streaming objects into Databricks tables
+
+Use the optional `object_sink` hook on `OktaIGABackupAsync` (or via `run_backup_sync`) to stream each backed-up object into Spark/Delta tables while still writing files locally. Example sketch:
+
+```python
+from pyspark.sql import SparkSession
+
+spark = SparkSession.builder.getOrCreate()
+
+def sink_to_delta(endpoint, obj):
+    # obj includes metadata and the raw JSON payload
+    df = spark.createDataFrame([{
+        "endpoint": endpoint,
+        "object_id": obj["object_id"],
+        "data": obj["data"],
+    }])
+    df.write.format("delta").mode("append").saveAsTable("okta_backup_objects")
+
+run_backup_sync(tenant_id=1, object_sink=sink_to_delta)
+```
+
+This hook runs after each file is written; if the sink fails, the backup continues and logs a warning.
+
 ## ⚙️ DYNAMIC ENDPOINT CONFIGURATION
 
 Control which endpoints run without code changes using JSON configuration:

@@ -245,6 +245,9 @@ class OktaIGABackupAsync:
                     # Create a mock response object with the data for compatibility
                     class MockResponse:
                         def __init__(self, status, data, headers):
+                            # aiohttp style
+                            self.status = status
+                            # requests style
                             self.status_code = status
                             self.headers = headers
                             self._json_data = data

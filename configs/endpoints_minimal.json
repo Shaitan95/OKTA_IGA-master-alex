@@ -1,0 +1,8 @@
+{
+  "global_endpoints": {
+    "campaigns": {"enabled": true},
+    "reviews": {"enabled": true}
+  },
+  "resource_endpoints": {
+  }
+}

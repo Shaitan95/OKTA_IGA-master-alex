@@ -1,0 +1,23 @@
+{
+  "global_endpoints": {
+    "campaigns": {"enabled": true},
+    "reviews": {"enabled": true},
+    "request_types": {"enabled": true},
+    "requests_v1": {"enabled": true},
+    "requests_v2": {"enabled": true},
+    "request_settings_global": {"enabled": true},
+    "entitlement_bundles": {"enabled": true},
+    "collections": {"enabled": true},
+    "risk_rules": {"enabled": true},
+    "delegates": {"enabled": true}
+  },
+  "resource_endpoints": {
+    "grants": {"enabled": true},
+    "entitlements": {"enabled": true},
+    "request_conditions": {"enabled": true},
+    "request_settings": {"enabled": true},
+    "request_sequences": {"enabled": true},
+    "principal_entitlements": {"enabled": true},
+    "principal_access": {"enabled": true}
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "async_config": {
+    "enabled": true,
+    "concurrency": {
+      "max_concurrent_api_calls": 15,
+      "max_concurrent_endpoints": 3,
+      "max_detail_calls_per_endpoint": 10,
+      "max_resource_discovery": 8
+    },
+    "rate_limiting": {
+      "rate_limit_per_minute": 50,
+      "burst_size": 10,
+      "retry_429_delay": 10,
+      "adaptive_throttling": true,
+      "backoff_multiplier": 1.5,
+      "max_retry_delay": 300
+    },
+    "performance": {
+      "connection_pool_size": 50,
+      "connection_timeout": 10,
+      "read_timeout": 30,
+      "keep_alive": true
+    }
+  },
+  
+  "backup": {
+    "modes": {
+      "test": {
+        "objects_per_endpoint": 1,
+        "resources_per_context": 1,
+        "output_directory": "test_backup"
+      },
+      "full": {
+        "objects_per_endpoint": -1,
+        "resources_per_context": -1,
+        "output_directory": "backup"
+      }
+    },
+    "storage": {
+      "create_individual_files": true,
+      "create_list_files": true,
+      "include_metadata": true,
+      "compress_output": false
+    },
+    "progress": {
+      "show_progress": true,
+      "progress_interval": 10,
+      "verbose_logging": false
+    }
+  },
+  
+  "endpoints": {
+    "discovery": {
+      "auto_discover_resources": true,
+      "test_governance_status": true,
+      "skip_failed_filters": true,
+      "max_filter_attempts": 3
+    },
+    "retry": {
+      "max_retries_per_endpoint": 3,
+      "retry_delay": 1,
+      "retry_on_status_codes": [429, 500, 502, 503, 504]
+    }
+  },
+  
+  "environment": {
+    "name": "production",
+    "debug": false,
+    "log_level": "INFO",
+    "log_api_calls": true,
+    "log_responses": false
+  }
+}

@@ -36,6 +36,10 @@ OKTA_IGA/
 └── envs/                           # Environment configurations (.env files)
 ```
 
+## 📄 ADDITIONAL DOCUMENTATION
+
+- [Plan for a Modular IGA Data Pipeline Refactor](docs/modular_pipeline_plan.md): Detailed proposal for evolving the backup system into a configurable pipeline that can target Delta Lake (S3/Databricks) or MySQL with minimal code changes.
+
 ## 🚀 QUICK START
 
 ### Prerequisites
